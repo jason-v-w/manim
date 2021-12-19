@@ -9,7 +9,7 @@ import operator as op
 import pathlib
 import time
 from functools import reduce
-from typing import Any, Union
+from typing import Any, Callable, Union
 
 import cairo
 import numpy as np
@@ -28,6 +28,12 @@ from ..utils.images import get_full_raster_image_path
 from ..utils.iterables import list_difference_update
 from ..utils.simple_functions import fdiv
 from ..utils.space_ops import angle_of_vector
+from ..utils.wallpaper_functions import (
+    wallpaper_scale,
+    wallpaper_shift,
+    wallpaper_stretch,
+    wallpaper_tile,
+)
 
 
 class Camera:
@@ -379,6 +385,96 @@ class Camera:
             whose return values must be the colors for that point
         """
         self.set_background(self.make_background_from_func(coords_to_colors_func))
+
+    def set_background_from_color_opacity(
+        self, color=self.background_color, opacity=self.background_opacity
+    ):
+        background_rgba = color_to_int_rgba(color, opacity)
+        self.background = np.full(
+            (height, width, self.n_channels),
+            background_rgba,
+            dtype=self.pixel_array_dtype,
+        )
+
+    def add_image_to_background(
+        self, image: Union[Image, str], wallpaper_func: Callable = wallpaper_scale
+    ):
+        """Use `wallpaper_func` to update the background with `image`.
+
+        `wallpaper_func` is used to apply `image` to the existing background. Some
+        options for `wallpaper_func' can be found in manim/utils/wallpaper_functions and
+        includes
+
+        - :meth:`wallpaper_shift` which positions the image on the background centering
+             it by default
+        - :meth:`wallpaper_tile` which does the same as :meth:`wallpaper_shift` and then
+             tessellates the image to completely fill the background
+        - :meth:`wallpaper_scale` which scales the image up or down so that it covers
+             the background in at least one dimension
+        - :meth:`wallpaper_stretch` which stretches the image ignoring the aspect ratio
+             so that it covers the background completely
+
+        Parameters
+        ----------
+        image
+            A :class:`PIL.Image`, a filename (string), a pathlib.Path object, or a file
+            object representing an image to use for the background
+
+        wallpaper_func
+            The function determining how to apply the image to the background
+
+        """
+        # a helper function to finish the last steps. The conditions on whether a file
+        # must be opened or not make it difficult to put these three lines in he code directly.
+        def _finish(img):
+            bgd_img = Image.fromarray(self.background, mode=self.image_mode)
+            new_bgd_img = wallpaper_func(bgd_img, img)
+            self.background = np.array(new_bgd_img).astype(self.pixel_array_dtype)
+
+        if isinstance(image, Image):
+            _finish(image)
+
+        # assume a string means image is a file path
+        elif isinstance(image, str):
+            path = get_full_raster_image_path(image)
+            with Image.open(path).convert(self.image_mode) as img:
+                _finish(img)
+
+        # image could be a pathlib.Path or file object. Let PIL library handle it or
+        # throw an error
+        else:
+            with Image.open(image).convert(self.image_mode) as img:
+                _finish(img)
+
+    def set_background_from_image(
+        self, image: Union[Image, str], wallpaper_func: Callable = wallpaper_scale
+    ):
+        """Sets the background to a pixel array using `wallpaper_func` to apply `image`.
+
+        The background is first set to a solid color using `self.background_color`, and
+        then `wallpaper_func` is used to apply `image`. Some options for
+        `wallpaper_func' can be found in manim/utils/wallpaper_functions and includes
+
+        - :meth:`wallpaper_shift` which positions the image on the background centering
+             it by default
+        - :meth:`wallpaper_tile` which does the same as :meth:`wallpaper_shift` and then
+             tessellates the image to completely fill the background
+        - :meth:`wallpaper_scale` which scales the image up or down so that it covers
+             the background in at least one dimension
+        - :meth:`wallpaper_stretch` which stretches the image ignoring the aspect ratio
+             so that it covers the background completely
+
+        Parameters
+        ----------
+        image
+            A :class:`PIL.Image`, a filename (string), a pathlib.Path object, or a file
+            object representing an image to use for the background
+
+        wallpaper_func
+            The function determining how to apply the image to the background
+        """
+        set_background_from_color_opacity()
+        add_image_to_background(image, wallpaper_func)
 
     def reset(self):
         """Resets the camera's pixel array
